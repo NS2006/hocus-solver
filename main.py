@@ -1,3 +1,4 @@
+import shutil
 import tkinter as tk
 from tkinter import ttk
 import pyautogui
@@ -15,9 +16,9 @@ class AppSolver:
         self.root.title("Hocus Solver")
         self.is_running = False
         self.direction_templates = {}
-        self.current_directions = []
-        self.last_directions = []  # Initialize last_directions
-        self.move_delay = 0.5
+        self.current_direction = None
+        self.last_direction = None
+        self.move_delay = 2  # Delay between moves in seconds
         
         # Initialize regions
         self.screen_width, self.screen_height = pyautogui.size()
@@ -72,7 +73,7 @@ class AppSolver:
         
         ttk.Label(settings_frame, text="Move Delay (s):").grid(row=0, column=0, sticky="w")
         self.delay_entry = ttk.Entry(settings_frame, width=5)
-        self.delay_entry.insert(0, "0.5")
+        self.delay_entry.insert(0, "2")
         self.delay_entry.grid(row=0, column=1, padx=5)
         
         ttk.Label(settings_frame, text="Detection Threshold:").grid(row=1, column=0, sticky="w")
@@ -124,18 +125,18 @@ class AppSolver:
         
         return direction_img, stage_img
 
-    def detect_all_directions(self, direction_img):
+    def match_direction(self, direction_img):
+        """Match the direction image against templates"""
         gray_img = cv2.cvtColor(np.array(direction_img), cv2.COLOR_RGB2GRAY)
-        threshold = float(self.threshold_entry.get() or 0.8)
-        detected_directions = []
+        best_match, best_score = None, -1
         
         for direction, template in self.direction_templates.items():
             res = cv2.matchTemplate(gray_img, template, cv2.TM_CCOEFF_NORMED)
             _, max_val, _, _ = cv2.minMaxLoc(res)
-            if max_val > threshold:
-                detected_directions.append(direction)
-        
-        return detected_directions
+            if max_val > best_score:
+                best_score, best_match = max_val, direction
+                
+        return best_match if best_score > 0.8 else None
 
     def perform_move(self, direction):
         center_x = self.screen_width // 2
@@ -183,36 +184,54 @@ class AppSolver:
             self.status_label.config(text="Detection stopped.")
 
     def run_detection(self):
-        detection_count = 0
+        """Main detection loop"""
+        direction_count = 0
+        stage_count = 0
         
         while self.is_running:
             try:
-                direction_img, _ = self.capture_regions()
-                self.current_directions = self.detect_all_directions(direction_img)
+                direction_img, stage_img = self.capture_regions()
                 
-                if self.current_directions:
-                    self.direction_label.config(
-                        text=f"Available Directions: {', '.join(self.current_directions)}"
-                    )
+                # Detect direction
+                direction = self.match_direction(direction_img)
+                if direction and direction != 'nothing':
+                    self.current_direction = direction
+                    self.direction_label.config(text=f"Direction: {direction}")
+                    direction_count += 1
                     
-                    # Only move if directions changed
-                    if set(self.current_directions) != set(self.last_directions):
-                        # For demo, just pick first available direction
-                        # You could implement more sophisticated selection logic here
-                        if self.current_directions:  # Check if list is not empty
-                            self.perform_move(self.current_directions[0])
-                            self.last_directions = self.current_directions.copy()
-                            time.sleep(self.move_delay)
+                    # Only perform move if direction changed
+                    if direction != self.last_direction:
+                        self.perform_move(direction)
+                        self.last_direction = direction
+                        time.sleep(self.move_delay)  # Delay after movement
                 
-                detection_count += 1
-                self.counter_label.config(text=f"Detections: {detection_count}")
-                time.sleep(0.1)
+                stage_count += 1
+                self.counter_label.config(
+                    text=f"Captures: {direction_count} directions, {stage_count} stages"
+                )
+                
+                time.sleep(0.1)  # Short delay between detections
                 
             except Exception as e:
                 print(f"Error: {e}")
                 time.sleep(1)
 
+def clear_screenshots():
+    """Empty the screenshot directories"""
+    screenshot_dirs = ["direction_screenshots", "stage_screenshots"]
+    
+    for dir_name in screenshot_dirs:
+        try:
+            # Remove the entire directory and recreate it
+            shutil.rmtree(dir_name)
+            os.makedirs(dir_name)
+            print(f"Cleared directory: {dir_name}")
+        except Exception as e:
+            print(f"Error clearing {dir_name}: {e}")
+
 if __name__ == "__main__":
     root = tk.Tk()
     app = AppSolver(root)
+
+    clear_screenshots()
     root.mainloop()
